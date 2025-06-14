@@ -1,18 +1,26 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
 
 from embed import vector_store
 from embed.embedder import get_embedding
-from embed.utils import chunk_all_texts  # optional, if needed for chunking
+from embed.utils import chunk_all_texts  # optional
 
 load_dotenv()
 
 app = FastAPI()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ✅ Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class QuestionRequest(BaseModel):
     question: str
@@ -31,26 +39,27 @@ async def load_documents():
     for post in discourse_data:
         all_chunks.append({"source": post["url"], "text": post["content"][:1000]})
 
-    #vector_store.add_documents(all_chunks)
+    vector_store.add_documents(all_chunks)
 
 @app.post("/api/")
 async def ask_virtual_ta(q: QuestionRequest):
     top_chunks = vector_store.search(q.question, k=3)
-    context = "\n---\n".join([c["text"] for c in top_chunks])
+    context = "\n\n---\n\n".join([c["text"] for c in top_chunks])
 
-    messages = [
-        {"role": "system", "content": "You are a helpful teaching assistant for the Tools in Data Science course."},
-        {"role": "user", "content": f"Question: {q.question}\n\nRelevant material:\n{context}"}
-    ]
+    # ✅ Dummy but context-based answer
+    dummy_answer = f"""
+I'm a virtual TA. Here's an answer based on your question and the most relevant course content:
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        temperature=0.3
-    )
+**Question:** {q.question}
+
+**Answer:** Based on the materials, it appears that:
+{context[:500]}...
+
+(Answer generated from context above. For full details, please refer to the course materials or forum discussions.)
+"""
 
     return {
-        "answer": response.choices[0].message.content.strip(),
+        "answer": dummy_answer.strip(),
         "links": [
             {"url": c["source"], "text": c["source"]} for c in top_chunks if c["source"].startswith("http")
         ]
